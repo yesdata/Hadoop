@@ -1,0 +1,172 @@
+MapReduce架构设计
+MapReduce1架构设计
+MapReduce1架构
+MapReduce1架构
+
+主要有四个组成部分
+
+Client: 客户端
+JobTracker: 负责资源监控和作业调度
+
+JobTracker监控所有TaskTracker与job的健康状况，一旦发现失败，就将相应的任务转移到其他节点
+JobTracker会跟踪任务的执行进度、资源使用量等信息，并将这些信息告诉任务调度器，而调度器会在资源出现空闲时，选择合适的任务使用这些资源
+在Hadoop中，任务调度器是一个可插拔的模块，用户可以根据自己的需要设计相应的调度器
+TaskTracker
+
+TaskTracker会周期性的通过Heartbeat将本节点上资源的使用情况和任务的运行进度汇报给JobTracker
+接收JobTracker发送过来的命令并执行相应的操作
+TaskTracker使用”slot”等量划分本节点上的资源量
+Task: 分为Map Task和Reduce Task,均由TaskTracker启动
+
+Map Task: 映射任务
+Reduce Task: 归约任务
+MapReduce2架构设计
+相同叫法
+MapReduce提交到Yarn的工作流程
+Yarn的工作流程
+Yarn的架构设计
+MapReduce2架构
+MapReduce2架构
+
+Client向YARN中提交应用程序，其中包括ApplicationMaster程序、启动ApplicationMaster的命令、用户程序等
+
+ResourceManger为该应用程序分配第一个Container，并与对应的Node-Manger通信，要求它在这个Container中启动应用程序的ApplicationMaster
+
+ApplicationMaster首先向ResourceManger注册，这样用户可以直接通过ResourceManger查看应用程序的运行状态，然后它将为各个任务申请资源，并监控它的运行状态，直到运行结束，即重复步骤4~7
+
+ApplicationMaster采用轮询的方式通过RPC协议向ResourceManager申请和领取资源
+
+一旦ApplicationMaster申请到资源后，便与对应的NodeManager通信，要求它启动任务
+
+NodeManager为任务设置好运行环境(包括环境变量、JAR包、二进制程序等)后，将任务启动命令写到一个脚本中，并通过运行该脚本启动任务
+
+各个任务通过某个RPC协议向ApplicationMaster汇报自己的状态和进度,以让ApplicationMaster随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务。在应用程序运行过程中，用户可随时通过RPC向ApplicationMaster查询应用程序的当前运行状态
+
+应用程序运行完成后，ApplicationMaster向ResourceManager注销并关闭自己
+
+当用户向YARN中提交一个应用程序后,YARN将分两个阶段运行该应用程序:
+
+a. 第一个阶段是启动ApplicationMaster
+b. 第二个阶段是由ApplicationMaster创建应用程序,为它申请资源,并监控它的整个运行过程,直到运行完成
+
+shuffle 洗牌 调优点 hive+spark
+shuffle
+
+词频统计：wordcount
+[hadoop@hadoop1 hadoop]$ vi 1.log
+bbb 123 1 2 2
+aaa bbb ccc
+bbb 123 1 2 2
+aaa
+123
+bbb
+ccc
+xxxxx
+
+[hadoop@hadoop1 hadoop]$ hdfs dfs -mkdir -p /wordcount/input
+[hadoop@hadoop1 hadoop]$ hdfs dfs -put 1.log /wordcount/input
+
+[hadoop@hadoop1 hadoop]$ hadoop jar ./share/hadoop/mapreduce/hadoop-mapreduce-examples-2.8.1.jar \
+> wordcount /wordcount/input /wordcount/output1
+
+
+17/12/19 22:44:32 INFO client.RMProxy: Connecting to ResourceManager at /0.0.0.0:8032
+17/12/19 22:44:34 INFO input.FileInputFormat: Total input files to process : 1
+17/12/19 22:44:34 WARN hdfs.DataStreamer: Caught exception
+java.lang.InterruptedException
+        at java.lang.Object.wait(Native Method)
+        at java.lang.Thread.join(Thread.java:1245)
+        at java.lang.Thread.join(Thread.java:1319)
+        at org.apache.hadoop.hdfs.DataStreamer.closeResponder(DataStreamer.java:927)
+        at org.apache.hadoop.hdfs.DataStreamer.endBlock(DataStreamer.java:578)
+        at org.apache.hadoop.hdfs.DataStreamer.run(DataStreamer.java:755)
+17/12/19 22:44:34 WARN hdfs.DataStreamer: Caught exception
+java.lang.InterruptedException
+        at java.lang.Object.wait(Native Method)
+        at java.lang.Thread.join(Thread.java:1245)
+        at java.lang.Thread.join(Thread.java:1319)
+        at org.apache.hadoop.hdfs.DataStreamer.closeResponder(DataStreamer.java:927)
+        at org.apache.hadoop.hdfs.DataStreamer.endBlock(DataStreamer.java:578)
+        at org.apache.hadoop.hdfs.DataStreamer.run(DataStreamer.java:755)
+17/12/19 22:44:34 INFO mapreduce.JobSubmitter: number of splits:1
+17/12/19 22:44:34 INFO mapreduce.JobSubmitter: Submitting tokens for job: job_1513689033755_0001
+17/12/19 22:44:35 INFO impl.YarnClientImpl: Submitted application application_1513689033755_0001
+17/12/19 22:44:35 INFO mapreduce.Job: The url to track the job: http://hadoop1:8088/proxy/application_1513689033755_0001/
+17/12/19 22:44:35 INFO mapreduce.Job: Running job: job_1513689033755_0001
+17/12/19 22:44:54 INFO mapreduce.Job: Job job_1513689033755_0001 running in uber mode : false
+17/12/19 22:44:54 INFO mapreduce.Job:  map 0% reduce 0%
+17/12/19 22:45:03 INFO mapreduce.Job:  map 100% reduce 0%
+17/12/19 22:45:12 INFO mapreduce.Job:  map 100% reduce 100%
+17/12/19 22:45:13 INFO mapreduce.Job: Job job_1513689033755_0001 completed successfully
+17/12/19 22:45:13 INFO mapreduce.Job: Counters: 49
+        File System Counters
+                FILE: Number of bytes read=98
+                FILE: Number of bytes written=272817
+                FILE: Number of read operations=0
+                FILE: Number of large read operations=0
+                FILE: Number of write operations=0
+                HDFS: Number of bytes read=181
+                HDFS: Number of bytes written=60
+                HDFS: Number of read operations=6
+                HDFS: Number of large read operations=0
+                HDFS: Number of write operations=2
+        Job Counters 
+                Launched map tasks=1
+                Launched reduce tasks=1
+                Data-local map tasks=1
+                Total time spent by all maps in occupied slots (ms)=6958
+                Total time spent by all reduces in occupied slots (ms)=6334
+                Total time spent by all map tasks (ms)=6958
+                Total time spent by all reduce tasks (ms)=6334
+                Total vcore-milliseconds taken by all map tasks=6958
+                Total vcore-milliseconds taken by all reduce tasks=6334
+                Total megabyte-milliseconds taken by all map tasks=7124992
+                Total megabyte-milliseconds taken by all reduce tasks=6486016
+        Map-Reduce Framework
+                Map input records=8
+                Map output records=14
+                Map output bytes=122
+                Map output materialized bytes=98
+                Input split bytes=114
+                Combine input records=14
+                Combine output records=8
+                Reduce input groups=8
+                Reduce shuffle bytes=98
+                Reduce input records=8
+                Reduce output records=8
+                Spilled Records=16
+                Shuffled Maps =1
+                Failed Shuffles=0
+                Merged Map outputs=1
+                GC time elapsed (ms)=187
+                CPU time spent (ms)=1740
+                Physical memory (bytes) snapshot=329904128
+                Virtual memory (bytes) snapshot=4130594816
+                Total committed heap usage (bytes)=202379264
+        Shuffle Errors
+                BAD_ID=0
+                CONNECTION=0
+                IO_ERROR=0
+                WRONG_LENGTH=0
+                WRONG_MAP=0
+                WRONG_REDUCE=0
+        File Input Format Counters 
+                Bytes Read=67
+        File Output Format Counters 
+                Bytes Written=60
+
+
+[hadoop@hadoop1 hadoop]$ hdfs dfs -ls /wordcount/output1
+Found 2 items
+-rw-r--r--   1 hadoop supergroup          0 2017-12-19 22:45 /wordcount/output1/_SUCCESS
+-rw-r--r--   1 hadoop supergroup         60 2017-12-19 22:45 /wordcount/output1/part-r-00000
+-rw-r--r--   1 hadoop supergroup         60 2017-12-19 22:45 /wordcount/output1/part-r-00001
+[hadoop@hadoop1 hadoop]$ hdfs dfs -cat /wordcount/output1/part-r-00000
+1       1
+123     2
+2       2
+aaa     2
+bbb     3
+ccc     2
+xxxxx   1
+[hadoop@hadoop1 hadoop]$ 
