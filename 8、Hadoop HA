@@ -1,0 +1,434 @@
+准备
+1、安装jdk/配置ssh/部署好zookeeper集群
+
+2、注意同步所有节点的时间
+
+3、配置主机名与ip映射关系
+
+vi /etc/hosts
+
+192.168.149.141 hadoop001
+
+192.168.149.142 hadoop002
+
+192.168.149.143 hadoop003
+
+hadoop-env.sh配置
+export JAVA_HOME=/usr/java/jdk 
+core-site.xml配置
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+<!--Yarn 需要使用 fs.defaultFS 指定NameNode URI -->
+    <property>
+            <name>fs.defaultFS</name>
+            <value>hdfs://mycluster</value>
+    </property>
+    <!--==============================Trash机制======================================= -->
+    <property>
+            <!--多长时间创建CheckPoint NameNode截点上运行的CheckPointer 从Current文件夹创建CheckPoint;默认：0 由fs.trash.interval项指定 -->
+            <name>fs.trash.checkpoint.interval</name>
+            <value>0</value>
+    </property>
+    <property>
+            <!--多少分钟.Trash下的CheckPoint目录会被删除,该配置服务器设置优先级大于客户端，默认：0 不删除 -->
+            <name>fs.trash.interval</name>
+            <value>1440</value>
+    </property>
+
+     <!--指定hadoop临时目录, hadoop.tmp.dir 是hadoop文件系统依赖的基础配置，很多路径都依赖它。如果hdfs-site.xml中不配 置namenode和datanode的存放位置，默认就放在这>个路径中 -->
+    <property>   
+            <name>hadoop.tmp.dir</name>
+            <value>/opt/software/hadoop/tmp</value>
+    </property>
+
+     <!-- 指定zookeeper地址 -->
+    <property>
+            <name>ha.zookeeper.quorum</name>
+            <value>hadoop001:2181,hadoop002:2181,hadoop003:2181</value>
+    </property>
+     <!--指定ZooKeeper超时间隔，单位毫秒 -->
+    <property>
+            <name>ha.zookeeper.session-timeout.ms</name>
+            <value>2000</value>
+    </property>
+
+    <property>
+       <name>hadoop.proxyuser.root.hosts</name>
+       <value>*</value> 
+    </property> 
+    <property> 
+        <name>hadoop.proxyuser.root.groups</name> 
+        <value>*</value> 
+   </property> 
+
+
+  <property>
+      <name>io.compression.codecs</name>
+      <value>org.apache.hadoop.io.compress.GzipCodec,
+        org.apache.hadoop.io.compress.DefaultCodec,
+        org.apache.hadoop.io.compress.BZip2Codec,
+        org.apache.hadoop.io.compress.SnappyCodec
+      </value>
+  </property>
+</configuration>
+hdfs-site.xml配置
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+<!--HDFS超级用户 -->
+<property>
+    <name>dfs.permissions.superusergroup</name>
+    <value>root</value>
+</property>
+
+<!--开启web hdfs -->
+<property>
+    <name>dfs.webhdfs.enabled</name>
+    <value>true</value>
+</property>
+<property>
+    <name>dfs.namenode.name.dir</name>
+    <value>/opt/software/hadoop/data/dfs/name</value>
+    <description> namenode 存放name table(fsimage)本地目录（需要修改）</description>
+</property>
+<property>
+    <name>dfs.namenode.edits.dir</name>
+    <value>${dfs.namenode.name.dir}</value>
+    <description>namenode粗放 transaction file(edits)本地目录（需要修改）</description>
+</property>
+<property>
+    <name>dfs.datanode.data.dir</name>
+    <value>/opt/software/hadoop/data/dfs/data</value>
+    <description>datanode存放block本地目录（需要修改）</description>
+</property>
+<property>
+    <name>dfs.replication</name>
+    <value>3</value>
+</property>
+<!-- 块大小256M （默认128M） -->
+<property>
+    <name>dfs.blocksize</name>
+    <value>268435456</value>
+</property>
+<!--======================================================================= -->
+<!--HDFS高可用配置 -->
+<!--指定hdfs的nameservice为mycluster,需要和core-site.xml中的保持一致 -->
+<property>
+    <name>dfs.nameservices</name>
+    <value>mycluster</value>
+</property>
+<property>
+    <!--设置NameNode IDs 此版本最大只支持两个NameNode -->
+    <name>dfs.ha.namenodes.mycluster</name>
+    <value>nn1,nn2</value>
+</property>
+
+<!-- Hdfs HA: dfs.namenode.rpc-address.[nameservice ID] rpc 通信地址 -->
+<property>
+    <name>dfs.namenode.rpc-address.mycluster.nn1</name>
+    <value>hadoop001:8020</value>
+</property>
+<property>
+    <name>dfs.namenode.rpc-address.mycluster.nn2</name>
+    <value>hadoop002:8020</value>
+</property>
+
+<!-- Hdfs HA: dfs.namenode.http-address.[nameservice ID] http 通信地址 -->
+<property>
+    <name>dfs.namenode.http-address.mycluster.nn1</name>
+    <value>hadoop001:50070</value>
+</property>
+<property>
+    <name>dfs.namenode.http-address.mycluster.nn2</name>
+    <value>hadoop002:50070</value>
+</property>
+
+<!--==================Namenode editlog同步 ============================================ -->
+<!--保证数据恢复 -->
+<property>
+    <name>dfs.journalnode.http-address</name>
+    <value>0.0.0.0:8480</value>
+</property>
+<property>
+    <name>dfs.journalnode.rpc-address</name>
+    <value>0.0.0.0:8485</value>
+</property>
+<property>
+    <!--设置JournalNode服务器地址，QuorumJournalManager 用于存储editlog -->
+    <!--格式：qjournal://<host1:port1>;<host2:port2>;<host3:port3>/<journalId> 端口同journalnode.rpc-address -->
+    <name>dfs.namenode.shared.edits.dir</name>
+    <value>qjournal://hadoop001:8485;hadoop002:8485;hadoop003:8485/mycluster</value>
+</property>
+
+<property>
+    <!--JournalNode存放数据地址 -->
+    <name>dfs.journalnode.edits.dir</name>
+    <value>/opt/software/hadoop/data/dfs/jn</value>
+</property>
+<!--==================DataNode editlog同步 ============================================ -->
+<property>
+    <!--DataNode,Client连接Namenode识别选择Active NameNode策略 -->
+                         <!-- 配置失败自动切换实现方式 -->
+    <name>dfs.client.failover.proxy.provider.mycluster</name>
+    <value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider</value>
+</property>
+<!--==================Namenode fencing：=============================================== -->
+<!--Failover后防止停掉的Namenode启动，造成两个服务 -->
+<property>
+    <name>dfs.ha.fencing.methods</name>
+    <value>sshfence</value>
+</property>
+<property>
+    <name>dfs.ha.fencing.ssh.private-key-files</name>
+    <value>/root/.ssh/id_rsa</value>
+</property>
+<property>
+    <!--多少milliseconds 认为fencing失败 -->
+    <name>dfs.ha.fencing.ssh.connect-timeout</name>
+    <value>30000</value>
+</property>
+
+<!--==================NameNode auto failover base ZKFC and Zookeeper====================== -->
+<!--开启基于Zookeeper  -->
+<property>
+    <name>dfs.ha.automatic-failover.enabled</name>
+    <value>true</value>
+</property>
+<!--动态许可datanode连接namenode列表 -->
+ <property>
+   <name>dfs.hosts</name>
+   <value>/opt/software/hadoop/etc/hadoop/slaves</value>
+ </property>
+</configuration>
+yarn-site.xml配置
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+<!-- nodemanager 配置 ================================================= -->
+<property>
+    <name>yarn.nodemanager.aux-services</name>
+    <value>mapreduce_shuffle</value>
+</property>
+<property>
+    <name>yarn.nodemanager.aux-services.mapreduce.shuffle.class</name>
+    <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+</property>
+<property>
+    <name>yarn.nodemanager.localizer.address</name>
+    <value>0.0.0.0:23344</value>
+    <description>Address where the localizer IPC is.</description>
+</property>
+<property>
+    <name>yarn.nodemanager.webapp.address</name>
+    <value>0.0.0.0:23999</value>
+    <description>NM Webapp address.</description>
+</property>
+
+<!-- HA 配置 =============================================================== -->
+<!-- Resource Manager Configs -->
+<property>
+    <name>yarn.resourcemanager.connect.retry-interval.ms</name>
+    <value>2000</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.ha.enabled</name>
+    <value>true</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.ha.automatic-failover.enabled</name>
+    <value>true</value>
+</property>
+<!-- 使嵌入式自动故障转移。HA环境启动，与 ZKRMStateStore 配合 处理fencing -->
+<property>
+    <name>yarn.resourcemanager.ha.automatic-failover.embedded</name>
+    <value>true</value>
+</property>
+<!-- 集群名称，确保HA选举时对应的集群 -->
+<property>
+    <name>yarn.resourcemanager.cluster-id</name>
+    <value>yarn-cluster</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.ha.rm-ids</name>
+    <value>rm1,rm2</value>
+</property>
+
+
+<!--这里RM主备结点需要单独指定,（可选）
+<property>
+     <name>yarn.resourcemanager.ha.id</name>
+     <value>rm2</value>
+ </property>
+ -->
+
+<property>
+    <name>yarn.resourcemanager.scheduler.class</name>
+    <value>org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.recovery.enabled</name>
+    <value>true</value>
+</property>
+<property>
+    <name>yarn.app.mapreduce.am.scheduler.connection.wait.interval-ms</name>
+    <value>5000</value>
+</property>
+<!-- ZKRMStateStore 配置 -->
+<property>
+    <name>yarn.resourcemanager.store.class</name>
+    <value>org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.zk-address</name>
+    <value>hadoop001:2181,hadoop002:2181,hadoop003:2181</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.zk.state-store.address</name>
+    <value>hadoop001:2181,hadoop002:2181,hadoop003:2181</value>
+</property>
+<!-- Client访问RM的RPC地址 (applications manager interface) -->
+<property>
+    <name>yarn.resourcemanager.address.rm1</name>
+    <value>hadoop001:23140</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.address.rm2</name>
+    <value>hadoop002:23140</value>
+</property>
+<!-- AM访问RM的RPC地址(scheduler interface) -->
+<property>
+    <name>yarn.resourcemanager.scheduler.address.rm1</name>
+    <value>hadoop001:23130</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.scheduler.address.rm2</name>
+    <value>hadoop002:23130</value>
+</property>
+<!-- RM admin interface -->
+<property>
+    <name>yarn.resourcemanager.admin.address.rm1</name>
+    <value>hadoop001:23141</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.admin.address.rm2</name>
+    <value>hadoop002:23141</value>
+</property>
+<!--NM访问RM的RPC端口 -->
+<property>
+    <name>yarn.resourcemanager.resource-tracker.address.rm1</name>
+    <value>hadoop001:23125</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.resource-tracker.address.rm2</name>
+    <value>hadoop002:23125</value>
+</property>
+<!-- RM web application 地址 -->
+<property>
+    <name>yarn.resourcemanager.webapp.address.rm1</name>
+    <value>hadoop001:8088</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.webapp.address.rm2</name>
+    <value>hadoop002:8088</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.webapp.https.address.rm1</name>
+    <value>hadoop001:23189</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.webapp.https.address.rm2</name>
+    <value>hadoop002:23189</value>
+</property>
+
+<property>
+   <name>yarn.log-aggregation-enable</name>
+   <value>true</value>
+</property>
+<property>
+     <name>yarn.log.server.url</name>
+     <value>http://hadoop001:19888/jobhistory/logs</value>
+</property>
+
+
+<property>
+    <name>yarn.nodemanager.resource.memory-mb</name>
+    <value>2048</value>
+</property>
+<property>
+    <name>yarn.scheduler.minimum-allocation-mb</name>
+    <value>1024</value>
+    <discription>单个任务可申请最少内存，默认1024MB</discription>
+ </property>
+
+
+  <property>
+<name>yarn.scheduler.maximum-allocation-mb</name>
+<value>2048</value>
+<discription>单个任务可申请最大内存，默认8192MB</discription>
+  </property>
+
+   <property>
+   <name>yarn.nodemanager.resource.cpu-vcores</name>
+   <value>2</value>
+</property>
+
+</configuration>
+mapred-site.xml配置
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+<!-- 配置 MapReduce Applications -->
+<property>
+    <name>mapreduce.framework.name</name>
+    <value>yarn</value>
+</property>
+<!-- JobHistory Server ============================================================== -->
+<!-- 配置 MapReduce JobHistory Server 地址 ，默认端口10020 -->
+<property>
+    <name>mapreduce.jobhistory.address</name>
+    <value>hadoop001:10020</value>
+</property>
+<!-- 配置 MapReduce JobHistory Server web ui 地址， 默认端口19888 -->
+<property>
+    <name>mapreduce.jobhistory.webapp.address</name>
+    <value>hadoop001:19888</value>
+</property>
+
+<!-- 配置 Map段输出的压缩,snappy-->
+  <property>
+  <name>mapreduce.map.output.compress</name> 
+  <value>true</value>
+  </property>
+
+  <property>
+  <name>mapreduce.map.output.compress.codec</name> 
+  <value>org.apache.hadoop.io.compress.SnappyCodec</value>
+   </property>
+
+</configuration>
+slaves配置
+hadoop001
+hadoop002
+hadoop003
+分发到其他机器
+scp -r /home/hadoop/apps/hadoop root@hadoop002:/home/hadoop/apps
+scp -r /home/hadoop/apps/hadoop root@hadoop003:/home/hadoop/apps
+启动zookeeper（hadoop001、hadoop002、hadoop003）
+zkServer.sh start
+启动JournalNode(部署了JN的节点)
+hadoop-daemon.sh start journalnode
+格式化HDFS
+cd /home/hadoop/apps/hadoop
+mkdir data/
+cd data/
+hdfs namenode -format(格式化命令)
+cd ../
+scp -r data/ root@hadoop002:/home/hadoop/apps/hadoop
+scp -r data/ root@hadoop003:/home/hadoop/apps/hadoop
+在zookeeper的主节点leader上格式化zookeeper集群
+hdfs zkfc -formatZK
+启动hadoop集群
+start-all.sh
+热备的RM要单独启动，故这一步在hadoop002上执行
+yarn-daemon.sh start resourcemanager
