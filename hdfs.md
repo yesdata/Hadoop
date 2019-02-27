@@ -1,2 +1,2 @@
 hdfs.md
-![image](https://github.com/yesdata/hadoop/hdfs.jpg)
+https://github.com/yesdata/hadoop/blob/master/hdfs.jpg
