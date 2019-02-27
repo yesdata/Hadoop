@@ -1,0 +1,141 @@
+Hadoop中的压缩格式
+压缩格式	工具	算法	文件扩展名	是否可切分
+DEFLATE	无	DEFLATE	.deflate	No
+gzip	gzip	DEFLATE	.gz	No
+LZ4	无	LZ4	.LZ4	NO
+bzip	bzip	bzip	.bz2	YES
+LZO	lzop	LZO	.lzo	YES if indexed
+Snappy	无	Snappy	.snappy	NO
+压缩比与压缩速度
+测试环境:
+8 core i7 cpu 
+8GB memory
+64 bit CentOS
+1.4GB Wikipedia Corpus 2-gram text input
+压缩比
+
+压缩时间
+可以看出压缩比越高，压缩时间越长，压缩比：Snappy < LZ4 < LZO < GZIP < BZIP2
+gzip:
+优点：压缩比在四种压缩方式中较高；hadoop本身支持，在应用中处理gzip格式的文件就和直接处理文本一样；有hadoop native库；大部分linux系统都自带gzip命令，使用方便。
+
+缺点：不支持split。
+
+lzo压缩
+优点：压缩/解压速度也比较快，合理的压缩率；支持split，是hadoop中最流行的压缩格式；支持hadoop native库；需要在linux系统下自行安装lzop命令，使用方便。
+
+缺点：压缩率比gzip要低；hadoop本身不支持，需要安装；lzo虽然支持split，但需要对lzo文件建索引，否则hadoop也是会把lzo文件看成一个普通文件（为了支持split需要建索引，需要指定inputformat为lzo格式）。
+
+snappy压缩
+优点：压缩速度快；支持hadoop native库。
+
+缺点：不支持split；压缩比低；hadoop本身不支持，需要安装；linux系统下没有对应的命令。
+
+bzip2压缩
+优点：支持split；具有很高的压缩率，比gzip压缩率都高；hadoop本身支持，但不支持native；在linux系统下自带bzip2命令，使用方便。
+
+缺点：压缩/解压速度慢；不支持native。
+
+压缩优缺点
+对于压缩的好处可以从两方面考虑：Storage + Compute；
+
+1）Storage ：基于HDFS考虑，减少了存储文件所占空间，提升了数据传输速率；
+
+2）Compute：基于YARN上的计算(MapReduce/Hive/Spark/….)速度的提升。
+
+在hadoop大数据的背景下，这两点尤为重要，怎样达到一个高效的处理，选择什么样的压缩方式和存储格式（下篇博客介绍）是很关键的。
+
+
+从这幅图带领大家进一步认识压缩于解压的优缺点，看到这幅图后你们有一定自己的认识吗？
+优点：减少存储空间（HDFS）,降低网络带宽，减少磁盘IO
+缺点：既然存在优点，那必然存在缺点，那就是CPU啦，压缩和解压肯定要消耗CPU的，如果CPU过高那肯定会导致集群负载过高，从而导致你的计算缓慢，job阻塞，文件读取变慢一系列原因。
+
+总结：
+
+1）不同的场景选择不同的压缩方式，肯定没有一个一劳永逸的方法，如果选择高压缩比，那么对于cpu的性能要求要高，同时压缩、解压时间耗费也多；选择压缩比低的，对于磁盘io、网络io的时间要多，空间占据要多；对于支持分割的，可以实现并行处理。
+
+2）分片的理解：举个例子，一个未压缩的文件有1GB大小，hdfs默认的block大小是64MB,那么这个文件就会被分为16个block作为mapreduce的输入，每一个单独使用一个map任务。如果这个文件是已经使用gzip压缩的呢，如果分成16个块，每个块做成一个输入，显然是不合适的，因为gzip压缩流的随即读是不可能的。实际上，当mapreduce处理压缩格式的文件的时候它会认识到这是一个gzip的压缩文件，而gzip又不支持随即读，它就会把16个块分给一个map去处理，这里就会有很多非本地处理的map任务，整个过程耗费的时间就会相当长。
+lzo压缩格式也会是同样的问题，但是通过使用hadoop lzo库的索引工具以后，lzo就可以支持splittable。bzip2也是支持splittable的。
+
+压缩在MapReduce中的应用场景
+
+在hadoop中的应用场景总结在三方面：输入，中间，输出。
+
+整体思路：hdfs ==> map ==> shuffle ==> reduce
+
+1）Use Compressd Map Input:从HDFS中读取文件进行Mapreuce作业，如果数据很大，可以使用压缩并且选择支持分片的压缩方式（Bzip2,LZO），可以实现并行处理，提高效率，减少磁盘读取时间，同时选择合适的存储格式例如Sequence Files，RC,ORC等；
+
+2）Compress Intermediate Data:Map输出作为Reducer的输入，需要经过shuffle这一过程，需要把数据读取到一个环形缓冲区，然后读取到本地磁盘，所以选择压缩可以减少了存储文件所占空间，提升了数据传输速率，建议使用压缩速度快的压缩方式，例如Snappy和LZO；
+
+3）Compress Reducer Output:进行归档处理或者链接Mapreduce的工作（该作业的输出作为下个作业的输入），压缩可以减少了存储文件所占空间，提升了数据传输速率，如果作为归档处理，可以采用高的压缩比（Gzip,Bzip2），如果作为下个作业的输入，考虑是否要分片进行选择；
+
+压缩配置
+core-site.xml
+
+<property>
+    <name>io.compression.codecs</name>
+    <value>
+    org.apache.hadoop.io.compress.GzipCodec,
+    org.apache.hadoop.io.compress.DefaultCodec, #zlib->Default
+    org.apache.hadoop.io.compress.BZip2Codec,
+    com.hadoop.compression.lzo.LzoCodec,
+    com.hadoop.compression.lzo.LzopCodec,
+    org.apache.hadoop.io.compress.Lz4Codec,
+    org.apache.hadoop.io.compress.SnappyCodec,
+    </value>
+</property>
+mapred-site.xml
+
+#mapper输出
+<property>
+     <name>mapreduce.map.output.compress</name>
+     <value>true</value>
+</property> 
+<property>
+     <name>mapred.map.output.compression.codec</name>
+     <value>org.apache.hadoop.io.compress.SnappyCodec</value>
+</property> 
+
+#reducer输
+<property>
+    <name>mapreduce.output.fileoutputformat.compress</name>
+    <value>true</value>
+</property>
+<property>
+    <name>mapreduce.output.fileoutputformat.compress.codec</name>
+    <value>org.apache.hadoop.io.compress.BZip2Codec</value>
+</property>
+
+Hive开启Map输出阶段压缩
+开启map输出阶段压缩可以减少job中map和Reduce task间数据传输量。具体配置如下：
+
+1）开启hive中间传输数据压缩功能
+
+hive>set hive.exec.compress.intermediate=true;
+2）开启mapreduce中map输出压缩功能
+
+hive>set mapreduce.map.output.compress=true;
+3）设置mapreduce中map输出数据的压缩方式
+
+hive>set mapreduce.map.output.compress.codec= org.apache.hadoop.io.compress.SnappyCodec;
+4）执行查询语句
+
+hive> select count(ename) name from emp;
+Hive开启Reduce输出阶段压缩
+当Hive将输出写入到表中时，输出内容同样可以进行压缩。属性hive.exec.compress.output控制着这个功能。用户可能需要保持默认设置文件中的默认值false，这样默认的输出就是非压缩的纯文本文件了。用户可以通过在查询语句或执行脚本中设置这个值为true，来开启输出结果压缩功能。
+
+1）开启hive最终输出数据压缩功能
+
+hive>set hive.exec.compress.output=true;
+2）开启mapreduce最终输出数据压缩
+
+hive>set mapreduce.output.fileoutputformat.compress=true;
+3）设置mapreduce最终数据输出压缩方式
+
+hive> set mapreduce.output.fileoutputformat.compress.codec = org.apache.hadoop.io.compress.SnappyCodec;
+4）设置mapreduce最终数据输出压缩为块压缩
+
+hive>set mapreduce.output.fileoutputformat.compress.type=BLOCK;
+5）测试一下输出结果是否是压缩文件
+
+insert overwrite local directory '/opt/module/datas/distribute-result' select * from emp
